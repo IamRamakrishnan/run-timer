@@ -155,6 +155,8 @@
 
       <button id="startBtn" class="primary" type="button">START</button>
       <button id="installBtn" class="secondary" type="button" hidden>Install app</button>
+      <button id="quickHapticBtn" class="secondary" type="button">Test vibration</button>
+      <div id="quickHapticStatus" class="hint"></div>
       <div id="planHint" class="hint">6 cycles · 30 min in Phase 1</div>
     </main>
 
@@ -171,6 +173,12 @@
             <option value="4">Phase 4: 1 min walk / 5 min jog</option>
           </select>
           <div class="muted">Manual selection overrides automatic phase upgrades.</div>
+        </div>
+
+        <div class="section stack">
+          <h3>Haptics</h3>
+          <button id="testHapticBtn" class="secondary" type="button">Test vibration</button>
+          <div id="hapticStatus" class="muted"></div>
         </div>
 
         <div class="section stack">
@@ -210,9 +218,9 @@
         </div>
 
         <div class="section stack">
-          <h3>Haptics</h3>
-          <button id="testHapticBtn" class="secondary" type="button">Test vibration</button>
-          <div id="hapticStatus" class="muted"></div>
+          <h3>App Update</h3>
+          <button id="updateAppBtn" class="secondary" type="button">Update app now</button>
+          <div id="updateStatus" class="muted"></div>
         </div>
 
         <button id="closeSettingsBtn" class="primary" type="button">Done</button>
@@ -227,6 +235,7 @@
         { walk: 120, jog: 180, label: "Phase 3 · 2m walk / 3m jog" },
         { walk: 60, jog: 300, label: "Phase 4 · 1m walk / 5m jog" },
       ];
+      const TOTAL_CYCLES = 6;
 
       const KEYS = {
         phase: "phase",
@@ -258,6 +267,8 @@
         planHint: document.getElementById("planHint"),
         startBtn: document.getElementById("startBtn"),
         installBtn: document.getElementById("installBtn"),
+        quickHapticBtn: document.getElementById("quickHapticBtn"),
+        quickHapticStatus: document.getElementById("quickHapticStatus"),
         openSettingsBtn: document.getElementById("openSettingsBtn"),
         closeSettingsBtn: document.getElementById("closeSettingsBtn"),
         settingsModal: document.getElementById("settingsModal"),
@@ -271,6 +282,8 @@
         incrementStreakBtn: document.getElementById("incrementStreakBtn"),
         resetAllBtn: document.getElementById("resetAllBtn"),
         simulateYesterdayBtn: document.getElementById("simulateYesterdayBtn"),
+        updateAppBtn: document.getElementById("updateAppBtn"),
+        updateStatus: document.getElementById("updateStatus"),
         testHapticBtn: document.getElementById("testHapticBtn"),
         hapticStatus: document.getElementById("hapticStatus"),
       };
@@ -364,7 +377,7 @@
         }
         const phase = getPhase();
         const base = PHASES[phase - 1];
-        return { walk: base.walk, jog: base.jog, cycles: 6, label: base.label };
+        return { walk: base.walk, jog: base.jog, cycles: TOTAL_CYCLES, label: base.label };
       }
 
       function modeDuration(mode) {
@@ -374,6 +387,7 @@
 
       function beep() {
         try {
+          pauseLocalMedia();
           const ctx = new (window.AudioContext || window.webkitAudioContext)();
           const oscillator = ctx.createOscillator();
           const gain = ctx.createGain();
@@ -395,6 +409,21 @@
 
       function setHapticStatus(message) {
         els.hapticStatus.textContent = message;
+        if (els.quickHapticStatus) {
+          els.quickHapticStatus.textContent = message;
+        }
+      }
+
+      function setUpdateStatus(message) {
+        if (els.updateStatus) {
+          els.updateStatus.textContent = message;
+        }
+      }
+
+      function pauseLocalMedia() {
+        document.querySelectorAll("audio,video").forEach((media) => {
+          try { media.pause(); } catch {}
+        });
       }
 
       function haptic(kind = "transition", includeFollowup = true) {
@@ -403,12 +432,9 @@
           return false;
         }
         const pattern = kind === "complete"
-          ? [320, 140, 320, 140, 320]
-          : [260, 120, 260];
+          ? [2200, 200, 2600]
+          : [1500, 200, 1500, 200, 1600];
         const started = navigator.vibrate(pattern);
-        if (started && kind === "transition" && includeFollowup) {
-          setTimeout(() => navigator.vibrate([160, 100, 160]), 650);
-        }
         setHapticStatus(
           started
             ? "Vibration signal sent."
@@ -566,6 +592,35 @@
         haptic("transition", false);
       }
 
+      async function updateAppNow() {
+        if (!("serviceWorker" in navigator)) {
+          setUpdateStatus("Service worker is unavailable in this browser.");
+          return;
+        }
+
+        setUpdateStatus("Checking for updates...");
+        try {
+          const registrations = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(registrations.map((registration) => registration.update()));
+
+          for (const registration of registrations) {
+            if (registration.waiting) {
+              registration.waiting.postMessage({ type: "SKIP_WAITING" });
+            }
+          }
+
+          if ("caches" in window) {
+            const keys = await caches.keys();
+            await Promise.all(keys.map((key) => caches.delete(key)));
+          }
+
+          setUpdateStatus("Refreshing app...");
+          setTimeout(() => window.location.reload(), 150);
+        } catch {
+          setUpdateStatus("Update failed. Close and reopen the app while online.");
+        }
+      }
+
       function resetStreak() {
         localStorage.setItem(KEYS.streak, "0");
         refreshSettingsInputs();
@@ -619,6 +674,7 @@
 
       function bindEvents() {
         els.startBtn.addEventListener("click", startWorkout);
+        els.quickHapticBtn.addEventListener("click", onTestHaptic);
 
         els.openSettingsBtn.addEventListener("click", () => {
           refreshSettingsInputs();
@@ -634,6 +690,7 @@
         els.incrementStreakBtn.addEventListener("click", incrementStreak);
         els.simulateYesterdayBtn.addEventListener("click", simulateYesterdayRun);
         els.resetAllBtn.addEventListener("click", resetAllData);
+        els.updateAppBtn.addEventListener("click", updateAppNow);
         els.testHapticBtn.addEventListener("click", onTestHaptic);
 
         window.addEventListener("beforeinstallprompt", (event) => {
@@ -657,6 +714,7 @@
 
       hydrateDefaults();
       setHapticStatus("Use Test vibration first. If no buzz, browser/device may block vibration.");
+      setUpdateStatus("Tap Update app now if the latest UI is not visible.");
       bindEvents();
       refreshSettingsInputs();
       render();

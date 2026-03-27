@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0f1115" />
+    <link rel="manifest" href="manifest.json" />
+    <title>Run Timer</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0b0d12;
+        --card: #151922;
+        --text: #f1f5f9;
+        --muted: #94a3b8;
+        --accent: #22c55e;
+        --accent-2: #38bdf8;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        background: radial-gradient(circle at top, #121826, var(--bg));
+        color: var(--text);
+        display: grid;
+        place-items: center;
+        padding: 16px;
+      }
+
+      .card {
+        width: min(100%, 420px);
+        background: color-mix(in oklab, var(--card) 94%, black);
+        border: 1px solid #202736;
+        border-radius: 22px;
+        box-shadow: 0 18px 45px rgba(0, 0, 0, 0.35);
+        padding: 24px;
+        text-align: center;
+      }
+
+      .phase {
+        color: var(--muted);
+        font-size: 0.95rem;
+        margin-bottom: 6px;
+      }
+
+      .state {
+        font-size: clamp(2rem, 9vw, 3rem);
+        letter-spacing: 0.12em;
+        margin: 0;
+      }
+
+      .timer {
+        margin: 12px 0 20px;
+        font-size: clamp(2.4rem, 12vw, 4rem);
+        font-variant-numeric: tabular-nums;
+        color: var(--accent-2);
+      }
+
+      .stats {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin: 18px 0 22px;
+      }
+
+      .stat {
+        background: #0f1420;
+        border: 1px solid #1e293b;
+        border-radius: 14px;
+        padding: 12px;
+      }
+
+      .stat .label {
+        color: var(--muted);
+        font-size: 0.82rem;
+      }
+
+      .stat .value {
+        margin-top: 4px;
+        font-size: 1.22rem;
+        font-weight: 700;
+      }
+
+      button {
+        width: 100%;
+        border: 0;
+        border-radius: 14px;
+        padding: 14px 16px;
+        font-size: 1rem;
+        font-weight: 700;
+        color: #07130b;
+        background: linear-gradient(135deg, var(--accent), #4ade80);
+      }
+
+      button:disabled {
+        opacity: 0.6;
+      }
+
+      .install {
+        margin-top: 12px;
+        background: #1e293b;
+        color: var(--text);
+      }
+
+      .hint {
+        color: var(--muted);
+        margin-top: 10px;
+        font-size: 0.85rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <div id="phaseLabel" class="phase">Phase 1 · 4m walk / 1m jog</div>
+      <h1 id="state" class="state">WALK</h1>
+      <div id="timer" class="timer">04:00</div>
+
+      <section class="stats">
+        <div class="stat">
+          <div class="label">Streak</div>
+          <div id="streak" class="value">🔥 0 days</div>
+        </div>
+        <div class="stat">
+          <div class="label">Estimated Steps</div>
+          <div id="steps" class="value">0</div>
+        </div>
+      </section>
+
+      <button id="startBtn" type="button">START</button>
+      <button id="installBtn" class="install" type="button" hidden>Install app</button>
+      <div class="hint">6 cycles · 30 min in Phase 1</div>
+    </main>
+
+    <script>
+      const PHASES = [
+        { walk: 240, jog: 60, label: "Phase 1 · 4m walk / 1m jog" },
+        { walk: 180, jog: 120, label: "Phase 2 · 3m walk / 2m jog" },
+        { walk: 120, jog: 180, label: "Phase 3 · 2m walk / 3m jog" },
+        { walk: 60, jog: 300, label: "Phase 4 · 1m walk / 5m jog" },
+      ];
+      const TOTAL_CYCLES = 6;
+      const STORAGE_KEY = "runTimerState_v1";
+
+      const phaseLabelEl = document.getElementById("phaseLabel");
+      const stateEl = document.getElementById("state");
+      const timerEl = document.getElementById("timer");
+      const streakEl = document.getElementById("streak");
+      const stepsEl = document.getElementById("steps");
+      const startBtn = document.getElementById("startBtn");
+      const installBtn = document.getElementById("installBtn");
+
+      let deferredPrompt = null;
+      let intervalId = null;
+      let countdown = 0;
+      let isRunning = false;
+      let mode = "walk";
+      let cycle = 1;
+      let steps = 0;
+      let streak = 0;
+      let phase = 1;
+      let lastWorkoutDate = null;
+
+      function todayUtc() {
+        return new Date().toISOString().slice(0, 10);
+      }
+
+      function daysBetween(dateA, dateB) {
+        const a = Date.parse(dateA + "T00:00:00Z");
+        const b = Date.parse(dateB + "T00:00:00Z");
+        return Math.round((b - a) / 86400000);
+      }
+
+      function beep() {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = ctx.createOscillator();
+        const gain = ctx.createGain();
+        oscillator.connect(gain);
+        gain.connect(ctx.destination);
+        oscillator.type = "sine";
+        oscillator.frequency.value = 880;
+        gain.gain.value = 0.12;
+        oscillator.start();
+        oscillator.stop(ctx.currentTime + 0.2);
+      }
+
+      function announce(text) {
+        if (!("speechSynthesis" in window)) return;
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 1;
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(utterance);
+      }
+
+      function haptic() {
+        if (navigator.vibrate) navigator.vibrate([180, 80, 180]);
+      }
+
+      function formatTime(seconds) {
+        const mm = String(Math.floor(seconds / 60)).padStart(2, "0");
+        const ss = String(seconds % 60).padStart(2, "0");
+        return `${mm}:${ss}`;
+      }
+
+      function getModeDuration(currentMode) {
+        const cfg = PHASES[phase - 1];
+        return currentMode === "walk" ? cfg.walk : cfg.jog;
+      }
+
+      function persist() {
+        localStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify({
+            isRunning,
+            countdown,
+            mode,
+            cycle,
+            steps,
+            streak,
+            phase,
+            lastWorkoutDate,
+          })
+        );
+      }
+
+      function hydrate() {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) {
+          countdown = PHASES[phase - 1].walk;
+          return;
+        }
+        try {
+          const data = JSON.parse(raw);
+          mode = data.mode || "walk";
+          cycle = data.cycle || 1;
+          countdown = Number.isInteger(data.countdown)
+            ? data.countdown
+            : getModeDuration(mode);
+          steps = Number.isFinite(data.steps) ? data.steps : 0;
+          streak = Number.isInteger(data.streak) ? data.streak : 0;
+          phase = Number.isInteger(data.phase) ? Math.min(4, Math.max(1, data.phase)) : 1;
+          lastWorkoutDate = data.lastWorkoutDate || null;
+        } catch {
+          countdown = PHASES[0].walk;
+        }
+      }
+
+      function updateUI() {
+        phaseLabelEl.textContent = PHASES[phase - 1].label;
+        stateEl.textContent = mode.toUpperCase();
+        timerEl.textContent = formatTime(countdown);
+        streakEl.textContent = `🔥 ${streak} day${streak === 1 ? "" : "s"}`;
+        stepsEl.textContent = Math.floor(steps).toLocaleString();
+      }
+
+      function updateStreakOnCompletion() {
+        const today = todayUtc();
+        if (!lastWorkoutDate) {
+          streak = 1;
+        } else {
+          const delta = daysBetween(lastWorkoutDate, today);
+          if (delta === 0) {
+            return;
+          } else if (delta === 1) {
+            streak += 1;
+          } else {
+            streak = 1;
+          }
+        }
+        lastWorkoutDate = today;
+
+        if (streak > 0 && streak % 14 === 0 && phase < PHASES.length) {
+          phase += 1;
+        }
+      }
+
+      function transitionMode() {
+        if (mode === "walk") {
+          mode = "jog";
+          countdown = getModeDuration("jog");
+          announce("Jog");
+        } else {
+          if (cycle >= TOTAL_CYCLES) {
+            completeWorkout();
+            return;
+          }
+          mode = "walk";
+          cycle += 1;
+          countdown = getModeDuration("walk");
+          announce("Walk");
+        }
+        haptic();
+        beep();
+      }
+
+      function tick() {
+        if (!isRunning) return;
+        if (countdown > 0) {
+          countdown -= 1;
+          steps += mode === "walk" ? 2 : 3;
+        }
+        if (countdown === 0) {
+          transitionMode();
+        }
+        updateUI();
+        persist();
+      }
+
+      function startWorkout() {
+        if (isRunning) return;
+        isRunning = true;
+        startBtn.textContent = "RUNNING";
+        startBtn.disabled = true;
+        if (cycle === 1 && mode === "walk" && countdown === getModeDuration("walk")) {
+          announce("Walk");
+        }
+        intervalId = setInterval(tick, 1000);
+        persist();
+      }
+
+      function completeWorkout() {
+        isRunning = false;
+        clearInterval(intervalId);
+        intervalId = null;
+        updateStreakOnCompletion();
+        mode = "walk";
+        cycle = 1;
+        countdown = getModeDuration("walk");
+        startBtn.textContent = "START";
+        startBtn.disabled = false;
+        announce("Workout complete");
+        haptic();
+        beep();
+        updateUI();
+        persist();
+      }
+
+      startBtn.addEventListener("click", async () => {
+        if (window.AudioContext || window.webkitAudioContext) {
+          try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            await ctx.resume();
+            ctx.close();
+          } catch {}
+        }
+        startWorkout();
+      });
+
+      window.addEventListener("beforeinstallprompt", (event) => {
+        event.preventDefault();
+        deferredPrompt = event;
+        installBtn.hidden = false;
+      });
+
+      installBtn.addEventListener("click", async () => {
+        if (!deferredPrompt) return;
+        deferredPrompt.prompt();
+        await deferredPrompt.userChoice;
+        deferredPrompt = null;
+        installBtn.hidden = true;
+      });
+
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker.register("./sw.js");
+        });
+      }
+
+      hydrate();
+      updateUI();
+      persist();
+    </script>
+  </body>
+</html>

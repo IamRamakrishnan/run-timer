@@ -11,15 +11,14 @@
         color-scheme: dark;
         --bg: #0b0d12;
         --card: #151922;
+        --panel: #101520;
         --text: #f1f5f9;
         --muted: #94a3b8;
         --accent: #22c55e;
         --accent-2: #38bdf8;
       }
 
-      * {
-        box-sizing: border-box;
-      }
+      * { box-sizing: border-box; }
 
       body {
         margin: 0;
@@ -33,6 +32,7 @@
       }
 
       .card {
+        position: relative;
         width: min(100%, 420px);
         background: color-mix(in oklab, var(--card) 94%, black);
         border: 1px solid #202736;
@@ -42,17 +42,21 @@
         text-align: center;
       }
 
-      .phase {
-        color: var(--muted);
-        font-size: 0.95rem;
-        margin-bottom: 6px;
+      .gear {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        width: 40px;
+        height: 40px;
+        border-radius: 12px;
+        border: 1px solid #273449;
+        background: #0f1420;
+        color: var(--text);
+        font-size: 1.15rem;
       }
 
-      .state {
-        font-size: clamp(2rem, 9vw, 3rem);
-        letter-spacing: 0.12em;
-        margin: 0;
-      }
+      .phase { color: var(--muted); font-size: 0.95rem; margin-bottom: 6px; }
+      .state { font-size: clamp(2rem, 9vw, 3rem); letter-spacing: 0.12em; margin: 0; }
 
       .timer {
         margin: 12px 0 20px;
@@ -61,12 +65,7 @@
         color: var(--accent-2);
       }
 
-      .stats {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 12px;
-        margin: 18px 0 22px;
-      }
+      .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 18px 0 22px; }
 
       .stat {
         background: #0f1420;
@@ -75,47 +74,70 @@
         padding: 12px;
       }
 
-      .stat .label {
-        color: var(--muted);
-        font-size: 0.82rem;
-      }
+      .label { color: var(--muted); font-size: 0.82rem; }
+      .value { margin-top: 4px; font-size: 1.22rem; font-weight: 700; }
 
-      .stat .value {
-        margin-top: 4px;
-        font-size: 1.22rem;
-        font-weight: 700;
-      }
-
-      button {
+      .primary,
+      .secondary,
+      .danger {
         width: 100%;
         border: 0;
         border-radius: 14px;
-        padding: 14px 16px;
-        font-size: 1rem;
+        padding: 12px 14px;
+        font-size: 0.95rem;
         font-weight: 700;
-        color: #07130b;
-        background: linear-gradient(135deg, var(--accent), #4ade80);
       }
 
-      button:disabled {
-        opacity: 0.6;
+      .primary { color: #07130b; background: linear-gradient(135deg, var(--accent), #4ade80); }
+      .secondary { margin-top: 12px; background: #1e293b; color: var(--text); }
+      .danger { background: #7f1d1d; color: #fee2e2; }
+
+      .hint { color: var(--muted); margin-top: 10px; font-size: 0.85rem; }
+
+      .modal {
+        position: fixed;
+        inset: 0;
+        background: rgba(2, 6, 14, 0.75);
+        display: grid;
+        place-items: end center;
+        padding: 0;
       }
 
-      .install {
-        margin-top: 12px;
-        background: #1e293b;
+      .modal[hidden] { display: none; }
+
+      .panel {
+        width: min(100%, 480px);
+        max-height: 88dvh;
+        overflow: auto;
+        border: 1px solid #223046;
+        border-radius: 18px 18px 0 0;
+        background: var(--panel);
+        padding: 18px;
+      }
+
+      .panel h2 { margin: 0 0 12px; font-size: 1.1rem; }
+      .section { border: 1px solid #1f2937; border-radius: 12px; padding: 12px; margin-bottom: 12px; }
+      .section h3 { margin: 0 0 8px; font-size: 0.95rem; color: #cbd5e1; }
+      .grid { display: grid; gap: 8px; grid-template-columns: 1fr 1fr; }
+
+      .stack { display: grid; gap: 8px; }
+
+      input,
+      select {
+        width: 100%;
+        border: 1px solid #334155;
+        border-radius: 10px;
+        padding: 10px;
+        background: #0b1220;
         color: var(--text);
       }
 
-      .hint {
-        color: var(--muted);
-        margin-top: 10px;
-        font-size: 0.85rem;
-      }
+      .muted { color: var(--muted); font-size: 0.82rem; }
     </style>
   </head>
   <body>
     <main class="card">
+      <button id="openSettingsBtn" class="gear" aria-label="Open settings">⚙️</button>
       <div id="phaseLabel" class="phase">Phase 1 · 4m walk / 1m jog</div>
       <h1 id="state" class="state">WALK</h1>
       <div id="timer" class="timer">04:00</div>
@@ -131,42 +153,183 @@
         </div>
       </section>
 
-      <button id="startBtn" type="button">START</button>
-      <button id="installBtn" class="install" type="button" hidden>Install app</button>
-      <div class="hint">6 cycles · 30 min in Phase 1</div>
+      <button id="startBtn" class="primary" type="button">START</button>
+      <button id="installBtn" class="secondary" type="button" hidden>Install app</button>
+      <div id="planHint" class="hint">6 cycles · 30 min in Phase 1</div>
     </main>
 
+    <section id="settingsModal" class="modal" hidden>
+      <div class="panel" role="dialog" aria-modal="true" aria-label="Settings panel">
+        <h2>Settings</h2>
+
+        <div class="section stack">
+          <h3>Phase Control</h3>
+          <select id="phaseSelect">
+            <option value="1">Phase 1: 4 min walk / 1 min jog</option>
+            <option value="2">Phase 2: 3 min walk / 2 min jog</option>
+            <option value="3">Phase 3: 2 min walk / 3 min jog</option>
+            <option value="4">Phase 4: 1 min walk / 5 min jog</option>
+          </select>
+          <div class="muted">Manual selection overrides automatic phase upgrades.</div>
+        </div>
+
+        <div class="section stack">
+          <h3>Custom Intervals</h3>
+          <div class="grid">
+            <label>
+              <span class="muted">Walk (sec)</span>
+              <input id="walkInput" type="number" min="30" step="1" value="240" />
+            </label>
+            <label>
+              <span class="muted">Jog (sec)</span>
+              <input id="jogInput" type="number" min="30" step="1" value="60" />
+            </label>
+          </div>
+          <label>
+            <span class="muted">Cycles</span>
+            <input id="cyclesInput" type="number" min="1" step="1" value="6" />
+          </label>
+          <button id="applyCustomBtn" class="secondary" type="button">Apply</button>
+        </div>
+
+        <div class="section stack">
+          <h3>Streak Controls</h3>
+          <div id="settingsStreak" class="value">Current streak: 0</div>
+          <div class="grid">
+            <button id="resetStreakBtn" class="secondary" type="button">Reset streak</button>
+            <button id="incrementStreakBtn" class="secondary" type="button">Increment streak</button>
+          </div>
+        </div>
+
+        <div class="section stack">
+          <h3>Data Controls</h3>
+          <div class="grid">
+            <button id="simulateYesterdayBtn" class="secondary" type="button">Simulate Yesterday Run</button>
+            <button id="resetAllBtn" class="danger" type="button">Reset All Data</button>
+          </div>
+        </div>
+
+        <button id="closeSettingsBtn" class="primary" type="button">Done</button>
+      </div>
+    </section>
+
     <script>
+      // ---------- constants ----------
       const PHASES = [
         { walk: 240, jog: 60, label: "Phase 1 · 4m walk / 1m jog" },
         { walk: 180, jog: 120, label: "Phase 2 · 3m walk / 2m jog" },
         { walk: 120, jog: 180, label: "Phase 3 · 2m walk / 3m jog" },
         { walk: 60, jog: 300, label: "Phase 4 · 1m walk / 5m jog" },
       ];
-      const TOTAL_CYCLES = 6;
-      const STORAGE_KEY = "runTimerState_v1";
 
-      const phaseLabelEl = document.getElementById("phaseLabel");
-      const stateEl = document.getElementById("state");
-      const timerEl = document.getElementById("timer");
-      const streakEl = document.getElementById("streak");
-      const stepsEl = document.getElementById("steps");
-      const startBtn = document.getElementById("startBtn");
-      const installBtn = document.getElementById("installBtn");
+      const KEYS = {
+        phase: "phase",
+        streak: "streak",
+        lastRun: "lastRun",
+        customIntervals: "customIntervals",
+        manualPhase: "manualPhase",
+        runtime: "runtimeState",
+      };
 
-      let deferredPrompt = null;
-      let intervalId = null;
-      let countdown = 0;
-      let isRunning = false;
-      let mode = "walk";
-      let cycle = 1;
-      let steps = 0;
-      let streak = 0;
-      let phase = 1;
-      let lastWorkoutDate = null;
+      // ---------- state ----------
+      const state = {
+        mode: "walk",
+        countdown: 240,
+        cycle: 1,
+        isRunning: false,
+        steps: 0,
+        deferredPrompt: null,
+        intervalId: null,
+      };
 
+      // ---------- dom ----------
+      const els = {
+        phaseLabel: document.getElementById("phaseLabel"),
+        state: document.getElementById("state"),
+        timer: document.getElementById("timer"),
+        streak: document.getElementById("streak"),
+        steps: document.getElementById("steps"),
+        planHint: document.getElementById("planHint"),
+        startBtn: document.getElementById("startBtn"),
+        installBtn: document.getElementById("installBtn"),
+        openSettingsBtn: document.getElementById("openSettingsBtn"),
+        closeSettingsBtn: document.getElementById("closeSettingsBtn"),
+        settingsModal: document.getElementById("settingsModal"),
+        phaseSelect: document.getElementById("phaseSelect"),
+        walkInput: document.getElementById("walkInput"),
+        jogInput: document.getElementById("jogInput"),
+        cyclesInput: document.getElementById("cyclesInput"),
+        applyCustomBtn: document.getElementById("applyCustomBtn"),
+        settingsStreak: document.getElementById("settingsStreak"),
+        resetStreakBtn: document.getElementById("resetStreakBtn"),
+        incrementStreakBtn: document.getElementById("incrementStreakBtn"),
+        resetAllBtn: document.getElementById("resetAllBtn"),
+        simulateYesterdayBtn: document.getElementById("simulateYesterdayBtn"),
+      };
+
+      // ---------- storage ----------
+      function getNumber(key, fallback) {
+        const val = Number(localStorage.getItem(key));
+        return Number.isFinite(val) ? val : fallback;
+      }
+
+      function getPhase() {
+        return Math.min(4, Math.max(1, getNumber(KEYS.phase, 1)));
+      }
+
+      function getStreak() {
+        return Math.max(0, getNumber(KEYS.streak, 0));
+      }
+
+      function getLastRun() {
+        return localStorage.getItem(KEYS.lastRun);
+      }
+
+      function getManualPhase() {
+        return localStorage.getItem(KEYS.manualPhase) === "1";
+      }
+
+      function getCustomIntervals() {
+        try {
+          const parsed = JSON.parse(localStorage.getItem(KEYS.customIntervals) || "null");
+          if (!parsed) return null;
+          if (parsed.walk < 30 || parsed.jog < 30 || parsed.cycles < 1) return null;
+          return parsed;
+        } catch {
+          return null;
+        }
+      }
+
+      function saveRuntime() {
+        localStorage.setItem(
+          KEYS.runtime,
+          JSON.stringify({
+            mode: state.mode,
+            countdown: state.countdown,
+            cycle: state.cycle,
+            steps: state.steps,
+          })
+        );
+      }
+
+      function loadRuntime() {
+        try {
+          const data = JSON.parse(localStorage.getItem(KEYS.runtime) || "null");
+          if (!data) return;
+          state.mode = data.mode === "jog" ? "jog" : "walk";
+          state.countdown = Number.isInteger(data.countdown) ? data.countdown : state.countdown;
+          state.cycle = Number.isInteger(data.cycle) ? Math.max(1, data.cycle) : 1;
+          state.steps = Number.isFinite(data.steps) ? Math.max(0, data.steps) : 0;
+        } catch {}
+      }
+
+      // ---------- helpers ----------
       function todayUtc() {
         return new Date().toISOString().slice(0, 10);
+      }
+
+      function yesterdayUtc() {
+        return new Date(Date.now() - 86400000).toISOString().slice(0, 10);
       }
 
       function daysBetween(dateA, dateB) {
@@ -175,23 +338,49 @@
         return Math.round((b - a) / 86400000);
       }
 
+      function formatTime(seconds) {
+        const mm = String(Math.floor(seconds / 60)).padStart(2, "0");
+        const ss = String(seconds % 60).padStart(2, "0");
+        return `${mm}:${ss}`;
+      }
+
+      function plan() {
+        const custom = getCustomIntervals();
+        if (custom) {
+          return {
+            walk: custom.walk,
+            jog: custom.jog,
+            cycles: custom.cycles,
+            label: `Custom · ${Math.floor(custom.walk / 60)}m${custom.walk % 60 ? ` ${custom.walk % 60}s` : ""} walk / ${Math.floor(custom.jog / 60)}m${custom.jog % 60 ? ` ${custom.jog % 60}s` : ""} jog`,
+          };
+        }
+        const phase = getPhase();
+        const base = PHASES[phase - 1];
+        return { walk: base.walk, jog: base.jog, cycles: 6, label: base.label };
+      }
+
+      function modeDuration(mode) {
+        const p = plan();
+        return mode === "walk" ? p.walk : p.jog;
+      }
+
       function beep() {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const oscillator = ctx.createOscillator();
-        const gain = ctx.createGain();
-        oscillator.connect(gain);
-        gain.connect(ctx.destination);
-        oscillator.type = "sine";
-        oscillator.frequency.value = 880;
-        gain.gain.value = 0.12;
-        oscillator.start();
-        oscillator.stop(ctx.currentTime + 0.2);
+        try {
+          const ctx = new (window.AudioContext || window.webkitAudioContext)();
+          const oscillator = ctx.createOscillator();
+          const gain = ctx.createGain();
+          oscillator.connect(gain);
+          gain.connect(ctx.destination);
+          oscillator.frequency.value = 880;
+          gain.gain.value = 0.12;
+          oscillator.start();
+          oscillator.stop(ctx.currentTime + 0.2);
+        } catch {}
       }
 
       function announce(text) {
         if (!("speechSynthesis" in window)) return;
         const utterance = new SpeechSynthesisUtterance(text);
-        utterance.rate = 1;
         window.speechSynthesis.cancel();
         window.speechSynthesis.speak(utterance);
       }
@@ -200,97 +389,94 @@
         if (navigator.vibrate) navigator.vibrate([180, 80, 180]);
       }
 
-      function formatTime(seconds) {
-        const mm = String(Math.floor(seconds / 60)).padStart(2, "0");
-        const ss = String(seconds % 60).padStart(2, "0");
-        return `${mm}:${ss}`;
+      function refreshSettingsInputs() {
+        const p = plan();
+        const phase = getPhase();
+        els.phaseSelect.value = String(phase);
+        els.walkInput.value = String(p.walk);
+        els.jogInput.value = String(p.jog);
+        els.cyclesInput.value = String(p.cycles);
+        els.settingsStreak.textContent = `Current streak: ${getStreak()}`;
       }
 
-      function getModeDuration(currentMode) {
-        const cfg = PHASES[phase - 1];
-        return currentMode === "walk" ? cfg.walk : cfg.jog;
+      // ---------- ui render ----------
+      function render() {
+        const p = plan();
+        const streak = getStreak();
+
+        els.phaseLabel.textContent = p.label;
+        els.state.textContent = state.mode.toUpperCase();
+        els.timer.textContent = formatTime(state.countdown);
+        els.streak.textContent = `🔥 ${streak} day${streak === 1 ? "" : "s"}`;
+        els.steps.textContent = Math.floor(state.steps).toLocaleString();
+        els.planHint.textContent = `${p.cycles} cycles · ${Math.round((p.walk + p.jog) * p.cycles / 60)} min total`;
+        els.settingsStreak.textContent = `Current streak: ${streak}`;
       }
 
-      function persist() {
-        localStorage.setItem(
-          STORAGE_KEY,
-          JSON.stringify({
-            isRunning,
-            countdown,
-            mode,
-            cycle,
-            steps,
-            streak,
-            phase,
-            lastWorkoutDate,
-          })
-        );
+      // ---------- timer logic ----------
+      function applyPlanLive() {
+        const p = plan();
+        state.cycle = Math.min(state.cycle, p.cycles);
+        state.countdown = modeDuration(state.mode);
+        saveRuntime();
+        render();
       }
 
-      function hydrate() {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) {
-          countdown = PHASES[phase - 1].walk;
-          return;
-        }
-        try {
-          const data = JSON.parse(raw);
-          mode = data.mode || "walk";
-          cycle = data.cycle || 1;
-          countdown = Number.isInteger(data.countdown)
-            ? data.countdown
-            : getModeDuration(mode);
-          steps = Number.isFinite(data.steps) ? data.steps : 0;
-          streak = Number.isInteger(data.streak) ? data.streak : 0;
-          phase = Number.isInteger(data.phase) ? Math.min(4, Math.max(1, data.phase)) : 1;
-          lastWorkoutDate = data.lastWorkoutDate || null;
-        } catch {
-          countdown = PHASES[0].walk;
-        }
-      }
+      function completeWorkout() {
+        state.isRunning = false;
+        clearInterval(state.intervalId);
+        state.intervalId = null;
 
-      function updateUI() {
-        phaseLabelEl.textContent = PHASES[phase - 1].label;
-        stateEl.textContent = mode.toUpperCase();
-        timerEl.textContent = formatTime(countdown);
-        streakEl.textContent = `🔥 ${streak} day${streak === 1 ? "" : "s"}`;
-        stepsEl.textContent = Math.floor(steps).toLocaleString();
-      }
-
-      function updateStreakOnCompletion() {
         const today = todayUtc();
-        if (!lastWorkoutDate) {
-          streak = 1;
-        } else {
-          const delta = daysBetween(lastWorkoutDate, today);
-          if (delta === 0) {
-            return;
-          } else if (delta === 1) {
-            streak += 1;
-          } else {
-            streak = 1;
+        const lastRun = getLastRun();
+        let streak = getStreak();
+
+        if (!lastRun) streak = 1;
+        else {
+          const delta = daysBetween(lastRun, today);
+          if (delta === 1) streak += 1;
+          else if (delta > 1) streak = 1;
+        }
+
+        localStorage.setItem(KEYS.streak, String(streak));
+        localStorage.setItem(KEYS.lastRun, today);
+
+        if (!getManualPhase() && !getCustomIntervals()) {
+          const phase = getPhase();
+          if (streak > 0 && streak % 14 === 0 && phase < PHASES.length) {
+            localStorage.setItem(KEYS.phase, String(phase + 1));
           }
         }
-        lastWorkoutDate = today;
 
-        if (streak > 0 && streak % 14 === 0 && phase < PHASES.length) {
-          phase += 1;
-        }
+        state.mode = "walk";
+        state.cycle = 1;
+        state.countdown = modeDuration("walk");
+        state.steps = 0;
+
+        els.startBtn.textContent = "START";
+        els.startBtn.disabled = false;
+        announce("Workout complete");
+        haptic();
+        beep();
+        saveRuntime();
+        refreshSettingsInputs();
+        render();
       }
 
       function transitionMode() {
-        if (mode === "walk") {
-          mode = "jog";
-          countdown = getModeDuration("jog");
+        const p = plan();
+        if (state.mode === "walk") {
+          state.mode = "jog";
+          state.countdown = p.jog;
           announce("Jog");
         } else {
-          if (cycle >= TOTAL_CYCLES) {
+          if (state.cycle >= p.cycles) {
             completeWorkout();
             return;
           }
-          mode = "walk";
-          cycle += 1;
-          countdown = getModeDuration("walk");
+          state.mode = "walk";
+          state.cycle += 1;
+          state.countdown = p.walk;
           announce("Walk");
         }
         haptic();
@@ -298,81 +484,148 @@
       }
 
       function tick() {
-        if (!isRunning) return;
-        if (countdown > 0) {
-          countdown -= 1;
-          steps += mode === "walk" ? 2 : 3;
+        if (!state.isRunning) return;
+        if (state.countdown > 0) {
+          state.countdown -= 1;
+          state.steps += state.mode === "walk" ? 2 : 3;
         }
-        if (countdown === 0) {
-          transitionMode();
-        }
-        updateUI();
-        persist();
+        if (state.countdown === 0) transitionMode();
+        saveRuntime();
+        render();
       }
 
       function startWorkout() {
-        if (isRunning) return;
-        isRunning = true;
-        startBtn.textContent = "RUNNING";
-        startBtn.disabled = true;
-        if (cycle === 1 && mode === "walk" && countdown === getModeDuration("walk")) {
-          announce("Walk");
-        }
-        intervalId = setInterval(tick, 1000);
-        persist();
+        if (state.isRunning) return;
+        state.isRunning = true;
+        els.startBtn.textContent = "RUNNING";
+        els.startBtn.disabled = true;
+        if (state.mode === "walk") announce("Walk");
+        state.intervalId = setInterval(tick, 1000);
       }
 
-      function completeWorkout() {
-        isRunning = false;
-        clearInterval(intervalId);
-        intervalId = null;
-        updateStreakOnCompletion();
-        mode = "walk";
-        cycle = 1;
-        countdown = getModeDuration("walk");
-        startBtn.textContent = "START";
-        startBtn.disabled = false;
-        announce("Workout complete");
-        haptic();
-        beep();
-        updateUI();
-        persist();
+      // ---------- controls ----------
+      function validateCustomInputs(walk, jog, cycles) {
+        if (!Number.isFinite(walk) || !Number.isFinite(jog) || !Number.isFinite(cycles)) return false;
+        if (walk < 30 || jog < 30 || cycles < 1) return false;
+        return true;
       }
 
-      startBtn.addEventListener("click", async () => {
-        if (window.AudioContext || window.webkitAudioContext) {
-          try {
-            const ctx = new (window.AudioContext || window.webkitAudioContext)();
-            await ctx.resume();
-            ctx.close();
-          } catch {}
+      function applyCustomIntervals() {
+        const walk = Number(els.walkInput.value);
+        const jog = Number(els.jogInput.value);
+        const cycles = Number(els.cyclesInput.value);
+
+        if (!validateCustomInputs(walk, jog, cycles)) {
+          alert("Invalid values. Walk/Jog must be at least 30 sec, cycles at least 1.");
+          return;
         }
-        startWorkout();
-      });
 
-      window.addEventListener("beforeinstallprompt", (event) => {
-        event.preventDefault();
-        deferredPrompt = event;
-        installBtn.hidden = false;
-      });
+        localStorage.setItem(KEYS.customIntervals, JSON.stringify({ walk, jog, cycles }));
+        applyPlanLive();
+      }
 
-      installBtn.addEventListener("click", async () => {
-        if (!deferredPrompt) return;
-        deferredPrompt.prompt();
-        await deferredPrompt.userChoice;
-        deferredPrompt = null;
-        installBtn.hidden = true;
-      });
+      function onPhaseChange() {
+        const selected = Number(els.phaseSelect.value);
+        localStorage.setItem(KEYS.phase, String(Math.min(4, Math.max(1, selected))));
+        localStorage.setItem(KEYS.manualPhase, "1");
+        localStorage.removeItem(KEYS.customIntervals);
+        applyPlanLive();
+        refreshSettingsInputs();
+      }
 
-      if ("serviceWorker" in navigator) {
-        window.addEventListener("load", () => {
-          navigator.serviceWorker.register("./sw.js");
+      function resetStreak() {
+        localStorage.setItem(KEYS.streak, "0");
+        refreshSettingsInputs();
+        render();
+      }
+
+      function incrementStreak() {
+        localStorage.setItem(KEYS.streak, String(getStreak() + 1));
+        refreshSettingsInputs();
+        render();
+      }
+
+      function simulateYesterdayRun() {
+        localStorage.setItem(KEYS.lastRun, yesterdayUtc());
+      }
+
+      function resetAllData() {
+        localStorage.removeItem(KEYS.phase);
+        localStorage.removeItem(KEYS.streak);
+        localStorage.removeItem(KEYS.lastRun);
+        localStorage.removeItem(KEYS.customIntervals);
+        localStorage.removeItem(KEYS.manualPhase);
+        localStorage.removeItem(KEYS.runtime);
+
+        state.mode = "walk";
+        state.cycle = 1;
+        state.steps = 0;
+        state.countdown = PHASES[0].walk;
+
+        if (state.intervalId) {
+          clearInterval(state.intervalId);
+          state.intervalId = null;
+        }
+        state.isRunning = false;
+        els.startBtn.textContent = "START";
+        els.startBtn.disabled = false;
+        refreshSettingsInputs();
+        render();
+      }
+
+      // ---------- init ----------
+      function hydrateDefaults() {
+        if (!localStorage.getItem(KEYS.phase)) localStorage.setItem(KEYS.phase, "1");
+        if (!localStorage.getItem(KEYS.streak)) localStorage.setItem(KEYS.streak, "0");
+
+        loadRuntime();
+        if (!Number.isInteger(state.countdown) || state.countdown <= 0) {
+          state.countdown = modeDuration(state.mode);
+        }
+      }
+
+      function bindEvents() {
+        els.startBtn.addEventListener("click", startWorkout);
+
+        els.openSettingsBtn.addEventListener("click", () => {
+          refreshSettingsInputs();
+          els.settingsModal.hidden = false;
         });
+        els.closeSettingsBtn.addEventListener("click", () => {
+          els.settingsModal.hidden = true;
+        });
+
+        els.phaseSelect.addEventListener("change", onPhaseChange);
+        els.applyCustomBtn.addEventListener("click", applyCustomIntervals);
+        els.resetStreakBtn.addEventListener("click", resetStreak);
+        els.incrementStreakBtn.addEventListener("click", incrementStreak);
+        els.simulateYesterdayBtn.addEventListener("click", simulateYesterdayRun);
+        els.resetAllBtn.addEventListener("click", resetAllData);
+
+        window.addEventListener("beforeinstallprompt", (event) => {
+          event.preventDefault();
+          state.deferredPrompt = event;
+          els.installBtn.hidden = false;
+        });
+
+        els.installBtn.addEventListener("click", async () => {
+          if (!state.deferredPrompt) return;
+          state.deferredPrompt.prompt();
+          await state.deferredPrompt.userChoice;
+          state.deferredPrompt = null;
+          els.installBtn.hidden = true;
+        });
+
+        if ("serviceWorker" in navigator) {
+          window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js"));
+        }
       }
 
-      hydrate();
-      updateUI();
-      persist();
+      hydrateDefaults();
+      bindEvents();
+      refreshSettingsInputs();
+      render();
+      saveRuntime();
     </script>
   </body>
 </html>

@@ -176,6 +176,22 @@
         </div>
 
         <div class="section stack">
+          <h3>Cue Engine</h3>
+          <label>
+            <input id="audioPriorityInput" type="checkbox" checked />
+            <span class="muted">Audio Priority Mode (always play tones)</span>
+          </label>
+          <label>
+            <input id="hapticsEnabledInput" type="checkbox" checked />
+            <span class="muted">Haptics Enabled</span>
+          </label>
+          <label>
+            <input id="speechEnabledInput" type="checkbox" checked />
+            <span class="muted">Speech Enabled</span>
+          </label>
+        </div>
+
+        <div class="section stack">
           <h3>Haptics</h3>
           <button id="testHapticBtn" class="secondary" type="button">Test vibration</button>
           <div id="hapticStatus" class="muted"></div>
@@ -244,6 +260,7 @@
         customIntervals: "customIntervals",
         manualPhase: "manualPhase",
         runtime: "runtimeState",
+        cueSettings: "cueSettings",
       };
 
       // ---------- state ----------
@@ -255,6 +272,7 @@
         steps: 0,
         deferredPrompt: null,
         intervalId: null,
+        lastInteractionAt: Date.now(),
       };
 
       // ---------- dom ----------
@@ -286,6 +304,9 @@
         updateStatus: document.getElementById("updateStatus"),
         testHapticBtn: document.getElementById("testHapticBtn"),
         hapticStatus: document.getElementById("hapticStatus"),
+        audioPriorityInput: document.getElementById("audioPriorityInput"),
+        hapticsEnabledInput: document.getElementById("hapticsEnabledInput"),
+        speechEnabledInput: document.getElementById("speechEnabledInput"),
       };
 
       // ---------- storage ----------
@@ -319,6 +340,25 @@
         } catch {
           return null;
         }
+      }
+
+      function getCueSettings() {
+        try {
+          const defaults = { audioPriority: true, hapticsEnabled: true, speechEnabled: true };
+          const raw = JSON.parse(localStorage.getItem(KEYS.cueSettings) || "null");
+          if (!raw || typeof raw !== "object") return defaults;
+          return {
+            audioPriority: raw.audioPriority !== false,
+            hapticsEnabled: raw.hapticsEnabled !== false,
+            speechEnabled: raw.speechEnabled !== false,
+          };
+        } catch {
+          return { audioPriority: true, hapticsEnabled: true, speechEnabled: true };
+        }
+      }
+
+      function saveCueSettings(next) {
+        localStorage.setItem(KEYS.cueSettings, JSON.stringify(next));
       }
 
       function saveRuntime() {
@@ -385,26 +425,90 @@
         return mode === "walk" ? p.walk : p.jog;
       }
 
-      function beep() {
-        try {
-          pauseLocalMedia();
-          const ctx = new (window.AudioContext || window.webkitAudioContext)();
-          const oscillator = ctx.createOscillator();
-          const gain = ctx.createGain();
-          oscillator.connect(gain);
-          gain.connect(ctx.destination);
-          oscillator.frequency.value = 880;
-          gain.gain.value = 0.12;
-          oscillator.start();
-          oscillator.stop(ctx.currentTime + 0.2);
-        } catch {}
+      // ---------- Cue Engine ----------
+      let audioContext = null;
+      let activeToneToken = 0;
+
+      const CUE_TONES = {
+        walk: { frequency: 500, beeps: [140, 140], gap: 100 },
+        jog: { frequency: 900, beeps: [240], gap: 100 },
+        prepare: { frequency: 700, beeps: [120, 120, 120], gap: 90 },
+        complete: { frequency: 1000, beeps: [220, 220], gap: 100 },
+      };
+
+      const CUE_SPEECH = { walk: "Walk", jog: "Jog", prepare: "Ready", complete: "Done" };
+      const CUE_HAPTICS = {
+        walk: [100, 50, 100],
+        jog: [200, 100, 200],
+        prepare: [80, 50, 80, 50, 80],
+        complete: [180, 80, 180],
+      };
+      const isDevHash = window.location.hash.includes("dev");
+
+      function cueLog(message, payload) {
+        if (isDevHash) console.log(`[cue] ${message}`, payload || "");
       }
 
-      function announce(text) {
-        if (!("speechSynthesis" in window)) return;
-        const utterance = new SpeechSynthesisUtterance(text);
+      function sleep(ms) {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+      }
+
+      function getAudioContext() {
+        if (!audioContext) {
+          const Ctx = window.AudioContext || window.webkitAudioContext;
+          if (!Ctx) return null;
+          audioContext = new Ctx();
+        }
+        return audioContext;
+      }
+
+      async function resumeAudioContext() {
+        const ctx = getAudioContext();
+        if (!ctx) return;
+        if (ctx.state === "suspended") {
+          try { await ctx.resume(); } catch {}
+        }
+      }
+
+      async function playTonePattern(type, options = {}) {
+        const pattern = CUE_TONES[type];
+        if (!pattern) return;
+        await resumeAudioContext();
+        const ctx = getAudioContext();
+        if (!ctx) return;
+        pauseLocalMedia();
+
+        const token = ++activeToneToken;
+        const beeps = options.fast ? pattern.beeps.map(() => 120) : pattern.beeps;
+        const gapMs = options.fast ? 70 : pattern.gap;
+        cueLog("tone played", { type, frequency: pattern.frequency, beeps, gapMs });
+
+        for (let i = 0; i < beeps.length; i += 1) {
+          if (token !== activeToneToken) return;
+          const durationMs = Math.min(250, Math.max(120, beeps[i]));
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(pattern.frequency, ctx.currentTime);
+          gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.15, ctx.currentTime + 0.01);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start();
+          osc.stop(ctx.currentTime + durationMs / 1000);
+          await sleep(durationMs + (i < beeps.length - 1 ? gapMs : 0));
+        }
+      }
+
+      function speakCue(type) {
+        const settings = getCueSettings();
+        const text = CUE_SPEECH[type];
+        if (!settings.speechEnabled || !text || !("speechSynthesis" in window)) return;
         window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 1;
         window.speechSynthesis.speak(utterance);
+        cueLog("speech triggered", { type, text });
       }
 
       function setHapticStatus(message) {
@@ -426,14 +530,14 @@
         });
       }
 
-      function haptic(kind = "transition", includeFollowup = true) {
+      function vibratePattern(type) {
+        const settings = getCueSettings();
+        if (!settings.hapticsEnabled) return false;
         if (!("vibrate" in navigator)) {
           setHapticStatus("Vibration is unavailable in this browser/device.");
           return false;
         }
-        const pattern = kind === "complete"
-          ? [2200, 200, 2600]
-          : [1500, 200, 1500, 200, 1600];
+        const pattern = CUE_HAPTICS[type] || CUE_HAPTICS.walk;
         const started = navigator.vibrate(pattern);
         setHapticStatus(
           started
@@ -443,14 +547,40 @@
         return started;
       }
 
+      async function triggerCue(type, options = {}) {
+        const settings = getCueSettings();
+        const shouldSpeak = options.speak ?? true;
+        const allowRepeat = options.allowRepeat ?? true;
+        const shouldPlayTone = settings.audioPriority || options.forceTone;
+        cueLog("cue type", { type, shouldSpeak, allowRepeat, shouldPlayTone });
+
+        if ("vibrate" in navigator) navigator.vibrate(0);
+        if (shouldPlayTone) await playTonePattern(type, { fast: options.fastTone });
+        await sleep(150);
+        if (shouldSpeak) speakCue(type);
+        void Promise.resolve().then(() => vibratePattern(type));
+
+        if (!allowRepeat) return;
+        const interactionAtStart = state.lastInteractionAt;
+        setTimeout(() => {
+          if (!state.isRunning) return;
+          if (state.lastInteractionAt !== interactionAtStart) return;
+          void triggerCue(type, { ...options, allowRepeat: false });
+        }, 2000);
+      }
+
       function refreshSettingsInputs() {
         const p = plan();
         const phase = getPhase();
+        const cue = getCueSettings();
         els.phaseSelect.value = String(phase);
         els.walkInput.value = String(p.walk);
         els.jogInput.value = String(p.jog);
         els.cyclesInput.value = String(p.cycles);
         els.settingsStreak.textContent = `Current streak: ${getStreak()}`;
+        if (els.audioPriorityInput) els.audioPriorityInput.checked = cue.audioPriority;
+        if (els.hapticsEnabledInput) els.hapticsEnabledInput.checked = cue.hapticsEnabled;
+        if (els.speechEnabledInput) els.speechEnabledInput.checked = cue.speechEnabled;
       }
 
       // ---------- ui render ----------
@@ -476,7 +606,7 @@
         render();
       }
 
-      function completeWorkout() {
+      async function completeWorkout() {
         state.isRunning = false;
         clearInterval(state.intervalId);
         state.intervalId = null;
@@ -509,32 +639,28 @@
 
         els.startBtn.textContent = "START";
         els.startBtn.disabled = false;
-        announce("Workout complete");
-        haptic("complete");
-        beep();
+        await triggerCue("complete");
         saveRuntime();
         refreshSettingsInputs();
         render();
       }
 
-      function transitionMode() {
+      async function transitionMode() {
         const p = plan();
         if (state.mode === "walk") {
           state.mode = "jog";
           state.countdown = p.jog;
-          announce("Jog");
+          await triggerCue("jog");
         } else {
           if (state.cycle >= p.cycles) {
-            completeWorkout();
+            await completeWorkout();
             return;
           }
           state.mode = "walk";
           state.cycle += 1;
           state.countdown = p.walk;
-          announce("Walk");
+          await triggerCue("walk");
         }
-        haptic("transition");
-        beep();
       }
 
       function tick() {
@@ -542,19 +668,23 @@
         if (state.countdown > 0) {
           state.countdown -= 1;
           state.steps += state.mode === "walk" ? 2 : 3;
+          if (state.countdown > 0 && state.countdown <= 3) {
+            void triggerCue("prepare", { speak: false, fastTone: true, allowRepeat: false, forceTone: true });
+          }
         }
-        if (state.countdown === 0) transitionMode();
+        if (state.countdown === 0) void transitionMode();
         saveRuntime();
         render();
       }
 
-      function startWorkout() {
+      async function startWorkout() {
         if (state.isRunning) return;
-        haptic("transition", false);
+        await resumeAudioContext();
+        state.lastInteractionAt = Date.now();
         state.isRunning = true;
         els.startBtn.textContent = "RUNNING";
         els.startBtn.disabled = true;
-        if (state.mode === "walk") announce("Walk");
+        if (state.mode === "walk") await triggerCue("walk");
         state.intervalId = setInterval(tick, 1000);
       }
 
@@ -589,7 +719,16 @@
       }
 
       function onTestHaptic() {
-        haptic("transition", false);
+        vibratePattern("walk");
+      }
+
+      function onCueSettingChange() {
+        const next = {
+          audioPriority: els.audioPriorityInput ? els.audioPriorityInput.checked : true,
+          hapticsEnabled: els.hapticsEnabledInput ? els.hapticsEnabledInput.checked : true,
+          speechEnabled: els.speechEnabledInput ? els.speechEnabledInput.checked : true,
+        };
+        saveCueSettings(next);
       }
 
       async function updateAppNow() {
@@ -644,6 +783,7 @@
         localStorage.removeItem(KEYS.customIntervals);
         localStorage.removeItem(KEYS.manualPhase);
         localStorage.removeItem(KEYS.runtime);
+        localStorage.removeItem(KEYS.cueSettings);
 
         state.mode = "walk";
         state.cycle = 1;
@@ -665,6 +805,9 @@
       function hydrateDefaults() {
         if (!localStorage.getItem(KEYS.phase)) localStorage.setItem(KEYS.phase, "1");
         if (!localStorage.getItem(KEYS.streak)) localStorage.setItem(KEYS.streak, "0");
+        if (!localStorage.getItem(KEYS.cueSettings)) {
+          saveCueSettings({ audioPriority: true, hapticsEnabled: true, speechEnabled: true });
+        }
 
         loadRuntime();
         if (!Number.isInteger(state.countdown) || state.countdown <= 0) {
@@ -692,6 +835,20 @@
         els.resetAllBtn.addEventListener("click", resetAllData);
         els.updateAppBtn.addEventListener("click", updateAppNow);
         els.testHapticBtn.addEventListener("click", onTestHaptic);
+        if (els.audioPriorityInput) els.audioPriorityInput.addEventListener("change", onCueSettingChange);
+        if (els.hapticsEnabledInput) els.hapticsEnabledInput.addEventListener("change", onCueSettingChange);
+        if (els.speechEnabledInput) els.speechEnabledInput.addEventListener("change", onCueSettingChange);
+
+        ["click", "touchstart", "keydown"].forEach((eventName) => {
+          document.addEventListener(eventName, () => {
+            state.lastInteractionAt = Date.now();
+            void resumeAudioContext();
+          }, { passive: true });
+        });
+
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "visible") void resumeAudioContext();
+        });
 
         window.addEventListener("beforeinstallprompt", (event) => {
           event.preventDefault();

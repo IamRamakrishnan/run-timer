@@ -209,6 +209,12 @@
           </div>
         </div>
 
+        <div class="section stack">
+          <h3>Haptics</h3>
+          <button id="testHapticBtn" class="secondary" type="button">Test vibration</button>
+          <div id="hapticStatus" class="muted"></div>
+        </div>
+
         <button id="closeSettingsBtn" class="primary" type="button">Done</button>
       </div>
     </section>
@@ -265,6 +271,8 @@
         incrementStreakBtn: document.getElementById("incrementStreakBtn"),
         resetAllBtn: document.getElementById("resetAllBtn"),
         simulateYesterdayBtn: document.getElementById("simulateYesterdayBtn"),
+        testHapticBtn: document.getElementById("testHapticBtn"),
+        hapticStatus: document.getElementById("hapticStatus"),
       };
 
       // ---------- storage ----------
@@ -385,8 +393,28 @@
         window.speechSynthesis.speak(utterance);
       }
 
-      function haptic() {
-        if (navigator.vibrate) navigator.vibrate([180, 80, 180]);
+      function setHapticStatus(message) {
+        els.hapticStatus.textContent = message;
+      }
+
+      function haptic(kind = "transition", includeFollowup = true) {
+        if (!("vibrate" in navigator)) {
+          setHapticStatus("Vibration is unavailable in this browser/device.");
+          return false;
+        }
+        const pattern = kind === "complete"
+          ? [320, 140, 320, 140, 320]
+          : [260, 120, 260];
+        const started = navigator.vibrate(pattern);
+        if (started && kind === "transition" && includeFollowup) {
+          setTimeout(() => navigator.vibrate([160, 100, 160]), 650);
+        }
+        setHapticStatus(
+          started
+            ? "Vibration signal sent."
+            : "Vibration blocked (check silent mode, battery saver, or browser restrictions)."
+        );
+        return started;
       }
 
       function refreshSettingsInputs() {
@@ -456,7 +484,7 @@
         els.startBtn.textContent = "START";
         els.startBtn.disabled = false;
         announce("Workout complete");
-        haptic();
+        haptic("complete");
         beep();
         saveRuntime();
         refreshSettingsInputs();
@@ -479,7 +507,7 @@
           state.countdown = p.walk;
           announce("Walk");
         }
-        haptic();
+        haptic("transition");
         beep();
       }
 
@@ -496,6 +524,7 @@
 
       function startWorkout() {
         if (state.isRunning) return;
+        haptic("transition", false);
         state.isRunning = true;
         els.startBtn.textContent = "RUNNING";
         els.startBtn.disabled = true;
@@ -531,6 +560,10 @@
         localStorage.removeItem(KEYS.customIntervals);
         applyPlanLive();
         refreshSettingsInputs();
+      }
+
+      function onTestHaptic() {
+        haptic("transition", false);
       }
 
       function resetStreak() {
@@ -601,6 +634,7 @@
         els.incrementStreakBtn.addEventListener("click", incrementStreak);
         els.simulateYesterdayBtn.addEventListener("click", simulateYesterdayRun);
         els.resetAllBtn.addEventListener("click", resetAllData);
+        els.testHapticBtn.addEventListener("click", onTestHaptic);
 
         window.addEventListener("beforeinstallprompt", (event) => {
           event.preventDefault();
@@ -622,6 +656,7 @@
       }
 
       hydrateDefaults();
+      setHapticStatus("Use Test vibration first. If no buzz, browser/device may block vibration.");
       bindEvents();
       refreshSettingsInputs();
       render();
